@@ -1,0 +1,105 @@
+---
+title: "PML Course Project"
+author: "Arcenis Rojas"
+date: "February 7, 2016"
+output: html_document
+---
+
+In this project I use data from the Human Activity Recognition (HAR) project to try to predict the manner in which the participants performed unilateral dumbell bicep curls. The five different ways in which they could have performed the movement are: exactly according to the specification (Class A), throwing the elbows to the front (Class B), lifting the dumbbell only halfway (Class C), lowering the dumbbell only halfway (Class D) and throwing the hips to the front (Class E)^[Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13) . Stuttgart, Germany: ACM SIGCHI, 2013.].
+
+
+The HAR training data contain 19622 observations of 160 variables, one of which is the "classe" variable, which is the one I will try to predict.
+
+Before beginning, I'll load all the necessary libraries.
+```{r load libraries, echo = TRUE}
+library(caret)
+library(randomForest)
+library(rpart)
+library(e1071)
+```
+
+# Downloading the data
+The first step is to download the data.
+```{r Download, echo = TRUE, cache = TRUE}
+train.ext <- "pml-training.csv"
+test.ext <- "pml-testing.csv"
+
+root.url <- "https://d396qusza40orc.cloudfront.net/predmachlearn/"
+download.file(paste0(root.url, train.ext), train.ext)
+download.file(paste0(root.url, test.ext), test.ext)
+
+pml.train <- read.csv(train.ext)
+validation <- read.csv(test.ext)
+```
+
+# Cleaning the data
+The training data contain a large proportion of missing values for many variables, which would make any predictive model unreliable. To clean the data first I'll get a summary of the ratios of missing data points to number of observations for each variable.
+```{r NA summary, echo = TRUE}
+na.check <- sapply(pml.train, function(x) sum(is.na(x)) / length(x))
+
+# Save a vector of the ratios that are greater than 0
+na.gt.0 <- na.check[na.check > 0]
+
+# Get a summary of all the ratios that are greater than zero
+summary(na.gt.0)
+
+# Get the number columns with ratios of missing values to total values that are
+# greater than 0
+length(na.gt.0)
+```
+
+The next step is to removing the variables with a high ratio of missing values and the variables with zero or near-zero variance from the training set. I'll also remove the first 6 variables from the remaining data because they are all identification and time stamp variables.
+```{r remove variables, echo = TRUE, cache = TRUE}
+# Remove the variables with too many missing values from the training data
+pml.train <- pml.train[, !(names(pml.train) %in% names(na.gt.0))]
+
+# Remove the variables that have zero or near-zero variance
+pml.train <- pml.train[, !(names(pml.train) %in%
+                               nearZeroVar(pml.train, names = TRUE))]
+
+# Remove the first 6 variables which are an ID variable and various time-stamp
+# variables
+pml.train <- pml.train[, -c(1:6)]
+```
+
+# Partitioning the data
+Next, I'll set the seed so that results are consistent each time this code is run and partition the data. I chose to use only 60% of the data for training and 40% for testing primarily to help reduce the risk of overfitting. While this likely will cause the model to have a higher variance relative to a model using a larger training set, it should have a lower degree of bias.
+```{r partition, echo = TRUE}
+# Set the seed
+set.seed(27)
+
+# Partition the training data into a training set and a test set
+trainInd <- createDataPartition(pml.train$classe, p = 0.6, list = FALSE)
+training <- pml.train[trainInd, ]
+testing <- pml.train[-trainInd, ]
+```
+
+# Generating models and testing accuracy
+I will use the training data to create and compare 4 models: LDA, Random Forest, RPart, and SVM.
+```{r generate models, echo = TRUE, cache = TRUE}
+# Genearte models
+fitLDA <- train(classe ~ ., data = training, method = "lda")
+fitRF <- randomForest(classe ~ ., data = training)
+fitTree <- train(classe ~ ., data = training, method = "rpart")
+fitSVM <- svm(classe ~ ., data = training)
+
+# Get accuracy measures using testing data
+sapply(c("fitLDA", "fitRF", "fitTree", "fitSVM"), function(x) {
+    confusionMatrix(testing$classe, predict(get(x), testing))$overall[1]
+})
+```
+
+Considering that the random forest model is over 99% accurate this is the model that I will choose though there is a bit of concern about possible overfitting. The model looks like this:
+```{r showRF, echo = TRUE}
+fitRF
+
+plot(fitRF, main = "Random Forest Error Rate by Number of Trees")
+```
+
+Given the above model, I expect the out of sample error rate to be 0.7%.
+
+# Make Predictions on the pml-test data
+Finally, I'll predict the outcomes of the cases in the "pml-test" data using the random forest model developped above. (The following code will not be evaluated so as not to reveal the predictions.)
+```{r predict, echo = TRUE, eval = FALSE}
+predict(fitRF, validation, type = "class")
+```
